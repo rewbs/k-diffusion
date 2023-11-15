@@ -700,3 +700,70 @@ def sample_dpmpp_3m_sde(model, x, sigmas, extra_args=None, callback=None, disabl
         denoised_1, denoised_2 = denoised, denoised_1
         h_1, h_2 = h, h_1
     return x
+
+@torch.no_grad()
+def sample_lcm(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None):
+    extra_args = {} if extra_args is None else extra_args
+    noise_sampler = default_noise_sampler(x) if noise_sampler is None else noise_sampler
+    s_in = x.new_ones([x.shape[0]])
+    for i in trange(len(sigmas) - 1, disable=disable):
+        denoised = model(x, sigmas[i] * s_in, **extra_args)
+        if callback is not None:
+            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+
+        x = denoised
+        if sigmas[i + 1] > 0:
+            x += sigmas[i + 1] * noise_sampler(sigmas[i], sigmas[i + 1])
+    return x
+
+
+    # class ModelSamplingDiscreteLCM(torch.nn.Module):
+    # def __init__(self):
+    #     super().__init__()
+    #     self.sigma_data = 1.0
+    #     timesteps = 1000
+    #     beta_start = 0.00085
+    #     beta_end = 0.012
+
+    #     betas = torch.linspace(beta_start**0.5, beta_end**0.5, timesteps, dtype=torch.float32) ** 2
+    #     alphas = 1.0 - betas
+    #     alphas_cumprod = torch.cumprod(alphas, dim=0)
+
+    #     original_timesteps = 50
+    #     self.skip_steps = timesteps // original_timesteps
+
+
+    #     alphas_cumprod_valid = torch.zeros((original_timesteps), dtype=torch.float32)
+    #     for x in range(original_timesteps):
+    #         alphas_cumprod_valid[original_timesteps - 1 - x] = alphas_cumprod[timesteps - 1 - x * self.skip_steps]
+
+    #     sigmas = ((1 - alphas_cumprod_valid) / alphas_cumprod_valid) ** 0.5
+    #     self.set_sigmas(sigmas)
+
+    # def set_sigmas(self, sigmas):
+    #     self.register_buffer('sigmas', sigmas)
+    #     self.register_buffer('log_sigmas', sigmas.log())
+
+    # @property
+    # def sigma_min(self):
+    #     return self.sigmas[0]
+
+    # @property
+    # def sigma_max(self):
+    #     return self.sigmas[-1]
+
+    # def timestep(self, sigma):
+    #     log_sigma = sigma.log()
+    #     dists = log_sigma.to(self.log_sigmas.device) - self.log_sigmas[:, None]
+    #     return dists.abs().argmin(dim=0).view(sigma.shape) * self.skip_steps + (self.skip_steps - 1)
+
+    # def sigma(self, timestep):
+    #     t = torch.clamp(((timestep - (self.skip_steps - 1)) / self.skip_steps).float(), min=0, max=(len(self.sigmas) - 1))
+    #     low_idx = t.floor().long()
+    #     high_idx = t.ceil().long()
+    #     w = t.frac()
+    #     log_sigma = (1 - w) * self.log_sigmas[low_idx] + w * self.log_sigmas[high_idx]
+    #     return log_sigma.exp()
+
+    # def percent_to_sigma(self, percent):
+    #     return self.sigma(torch.tensor(percent * 999.0))
